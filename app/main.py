@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import init_db
-from app.api import auth, tenant, department, employee, salary, payroll, payment, wechat
+from app.api import auth, tenant, department, employee, salary, payroll, payment, wechat, project
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -33,6 +33,7 @@ app.include_router(salary.router, prefix="/api/v1")
 app.include_router(payroll.router, prefix="/api/v1")
 app.include_router(payment.router, prefix="/api/v1")
 app.include_router(wechat.router, prefix="/api/v1")
+app.include_router(project.router, prefix="/api/v1")
 
 
 @app.get("/")

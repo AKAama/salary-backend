@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from pydantic import BaseModel, EmailStr
+from typing import Optional
 from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.models.models import User, Tenant
 from app.schemas.schemas import (
-    UserCreate, UserResponse, LoginRequest, TokenResponse,
-    TenantCreate, TenantResponse
+    UserResponse, LoginRequest, TokenResponse,
+    TenantCreate
 )
 from app.api.deps import get_current_user
 from datetime import timedelta
@@ -15,12 +17,27 @@ from app.core.config import settings
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 
+# Register request schemas (separate from UserCreate to avoid tenant_id requirement)
+class RegisterUserData(BaseModel):
+    username: str
+    password: str
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+
+
+class RegisterRequest(BaseModel):
+    tenant_data: TenantCreate
+    user_data: RegisterUserData
+
+
 @router.post("/register", response_model=TokenResponse)
 async def register(
-    tenant_data: TenantCreate,
-    user_data: UserCreate,
+    request: RegisterRequest,
     db: AsyncSession = Depends(get_db)
 ):
+    user_data = request.user_data
+    tenant_data = request.tenant_data
+
     # Check if username exists
     result = await db.execute(select(User).where(User.username == user_data.username))
     if result.scalar_one_or_none():
@@ -65,8 +82,8 @@ async def register(
 
     # Create token
     access_token = create_access_token(
-        data={"sub": user.id},
-        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        data={"sub": str(user.id)},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
     return TokenResponse(
@@ -98,8 +115,8 @@ async def login(
         )
 
     access_token = create_access_token(
-        data={"sub": user.id},
-        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        data={"sub": str(user.id)},
+        expires_delta=timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
 
     return TokenResponse(

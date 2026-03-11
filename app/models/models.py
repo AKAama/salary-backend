@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Numeric, Text, Date, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Numeric, Text, Date, Enum as SQLEnum, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.core.database import Base
@@ -16,6 +16,63 @@ class PaymentStatus(str, enum.Enum):
     SUCCESS = "success"
     FAILED = "failed"
     PROCESSING = "processing"
+
+
+class ProjectStatus(str, enum.Enum):
+    DRAFT = "draft"          # 草稿
+    RUNNING = "running"      # 进行中
+    COMPLETED = "completed"  # 已完成
+    CANCELLED = "cancelled"  # 已取消
+
+
+
+class ProjectEmployee(Base):
+    """项目员工（包括临时工/兼职）"""
+    __tablename__ = "project_employees_new"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id"))  # 关联正式员工，可选
+
+    # 临时员工信息（不通过员工系统，直接加项目）
+    name = Column(String(100), nullable=False)  # 姓名
+    phone = Column(String(20), nullable=False)  # 手机号
+    id_card = Column(String(20))  # 身份证
+    wechat_openid = Column(String(100))  # 微信openid
+    wechat_real_name = Column(String(100))  # 微信实名
+
+    # 薪资方式：hourly=时薪，daily=日薪
+    salary_type = Column(String(20), default="hourly")  # hourly / daily
+    hourly_rate = Column(Numeric(10, 2), default=0)  # 时薪
+    daily_rate = Column(Numeric(10, 2), default=0)  # 日薪
+
+    remarks = Column(Text)  # 备注
+    status = Column(Boolean, default=True)  # 状态
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    project = relationship("Project")
+    employee = relationship("Employee")
+    adjustments = relationship("ProjectEmployeeAdjustment", back_populates="project_employee")
+
+
+class ProjectEmployeeAdjustment(Base):
+    """项目员工调薪记录（加钱/扣钱）"""
+    __tablename__ = "project_employee_adjustments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_employee_id = Column(Integer, ForeignKey("project_employees_new.id"), nullable=False)
+    adjustment_type = Column(String(20), nullable=False)  # bonus(加钱) / deduction(扣钱)
+    amount = Column(Numeric(10, 2), nullable=False)  # 金额
+    reason = Column(String(255))  # 原因/备注
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+
+    # Relationships
+    project_employee = relationship("ProjectEmployee", back_populates="adjustments")
+    creator = relationship("User")
 
 
 class Tenant(Base):
@@ -39,6 +96,7 @@ class Tenant(Base):
     salary_templates = relationship("SalaryTemplate", back_populates="tenant")
     payrolls = relationship("Payroll", back_populates="tenant")
     wechat_config = relationship("WeChatConfig", back_populates="tenant", uselist=False)
+    projects = relationship("Project", back_populates="tenant")
 
 
 class User(Base):
@@ -75,7 +133,7 @@ class Department(Base):
     tenant = relationship("Tenant", back_populates="departments")
     parent = relationship("Department", remote_side=[id], backref="children")
     manager = relationship("Employee", foreign_keys=[manager_id])
-    employees = relationship("Employee", back_populates="department")
+    employees = relationship("Employee", foreign_keys="Employee.department_id", back_populates="department")
 
 
 class Employee(Base):
@@ -98,9 +156,32 @@ class Employee(Base):
 
     # Relationships
     tenant = relationship("Tenant", back_populates="employees")
-    department = relationship("Department", back_populates="employees")
+    department = relationship("Department", foreign_keys="Employee.department_id", back_populates="employees")
     salary_records = relationship("SalaryRecord", back_populates="employee")
     payroll_items = relationship("PayrollItem", back_populates="employee")
+    # Removed old association - use ProjectEmployee instead
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    name = Column(String(255), nullable=False)  # 项目名称，如"顺丰速运"
+    client_name = Column(String(255))  # 客户名称
+    description = Column(Text)  # 项目描述
+    start_date = Column(Date)  # 开始日期
+    end_date = Column(Date)  # 结束日期
+    status = Column(SQLEnum(ProjectStatus), default=ProjectStatus.DRAFT)  # 项目状态
+    remark = Column(Text)  # 备注
+    created_by = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    tenant = relationship("Tenant", back_populates="projects")
+    creator = relationship("User")
+    project_employees = relationship("ProjectEmployee", back_populates="project", cascade="all, delete-orphan")
 
 
 class SalaryTemplate(Base):
@@ -157,6 +238,7 @@ class Payroll(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"))  # 关联项目
     month = Column(String(7), nullable=False)  # 工资月份: 2024-01
     total_amount = Column(Numeric(12, 2), default=0)  # 总金额
     total_count = Column(Integer, default=0)  # 人数
@@ -168,6 +250,7 @@ class Payroll(Base):
 
     # Relationships
     tenant = relationship("Tenant", back_populates="payrolls")
+    project = relationship("Project")
     items = relationship("PayrollItem", back_populates="payroll")
     creator = relationship("User")
 

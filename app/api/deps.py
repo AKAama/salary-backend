@@ -21,8 +21,17 @@ async def get_current_user(
             detail="Invalid authentication credentials",
         )
 
-    user_id: int = payload.get("sub")
+    user_id: str = payload.get("sub")
     if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+
+    # Convert to int (JWT stores as string)
+    try:
+        user_id = int(user_id)
+    except (ValueError, TypeError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials",
